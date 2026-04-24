@@ -8,12 +8,18 @@ const fs = require("fs");
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || origin.startsWith("http://localhost:")) {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.some(o => o === origin || (typeof o === 'string' && o.startsWith(origin)))) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
