@@ -4,18 +4,17 @@ const User = require("../models/User");
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-const SYSTEM_INSTRUCTION = `You are JobGati AI, a professional career consultant specialized in Indian local and tech job markets.
+const SYSTEM_INSTRUCTION = `You are JobGati AI, an expert customized career consultant for the Indian job market.
 
 Interview Protocol:
-1. START WITH ROLE: The first question must be "What is your Target Role?". 
-2. CUSTOM TECHNICAL INTERVIEW: Once the role is identified (e.g., Electrician, Web Dev, Plumber), generate a focused technical interview.
-3. STRICT PROBING: Ask 2-3 deep-dive technical questions based on the role and the user's mentioned skills.
-   - For local jobs (e.g., Electrician): Ask about specific wire gauges, MCB wiring, tool safety (ISI marks), or earthing.
-   - For tech jobs: Ask about specific architectural decisions, debugging, or library nuances.
-4. BASES ON PROFILE: Use the user's provided profile (skills, education, experience) to tailor the questions. Don't ask what they already told you in their profile unless you are verifying depth.
-5. NO REPETITION: Do not ask the same questions in every interview. Be dynamic and adapt to their previous answer.
-6. QUANTITY: Ask a total of 5-6 questions.
-7. TERMINATE: After 6 questions, say: "Thank you! I now have enough information to analyze your profile. Click 'Finish Interview' to see your results."`;
+1. TARGET ROLE: The user will identify their target role. 
+2. CUSTOMIZED INTERVIEW ONLY: Strictly ask technical and situational questions for that specific role based on their profile.
+3. BE UNIQUE AND DYNAMIC: Do NOT use a standard script. Use the user's specific skills and experience provided to craft highly unique questions each time. No two interviews should have the exact same questions.
+4. DEEP PROBING: Ask 1 question at a time. If they mention a skill, ask a specific edge-case scenario or how they solved a problem with it.
+5. VALIDATE RESPONSE (CRITICAL): Check if the user's reply is actually relevant to your question. If it is gibberish, completely unrelated, or dodging the question, DO NOT move to the next question. Reply by saying: "That doesn't seem to answer the question. Please provide a relevant answer, or let me know if you want to skip it." Only count relevant answers towards the 5 question limit.
+6. NO GENERIC ADVICE: Do not give advice or evaluate their answer. Just ask the next question.
+7. DURATION: Ask exactly 5 role-specific technical questions.
+8. CONCLUSION: After 5 questions have been answered properly, check if you have enough information. If so, end the interview exactly with: "Thank you! I now have enough information to analyze your profile. Click 'Finish Interview' to see your results."`;
 
 // In-memory session store
 const sessions = {};
@@ -69,6 +68,7 @@ const sendMessage = async (req, res) => {
         session.msgCount++;
 
         if (!process.env.GEMINI_API_KEY) {
+            console.warn("⚠️ API KEY MISSING: Using fallback mock responses! Check your .env setup.");
             // Fallback mock logic if no key
             const fallbacks = [
                 "That's a great role! Tell me about the tools you'd use for that job.",
@@ -83,24 +83,43 @@ const sendMessage = async (req, res) => {
             return res.json({ message: reply, done });
         }
 
-        const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
-            systemInstruction: SYSTEM_INSTRUCTION
-        });
+        try {
+            const model = genAI.getGenerativeModel({
+                model: "gemini-1.5-flash",
+                systemInstruction: SYSTEM_INSTRUCTION,
+                generationConfig: {
+                    temperature: 0.8,
+                }
+            });
 
-        const chat = model.startChat({
-            history: session.messages.slice(0, -1), // Everything except the latest user msg
-        });
+            const chat = model.startChat({
+                history: session.messages.slice(0, -1),
+            });
 
-        const result = await chat.sendMessage(message);
-        const reply = result.response.text();
-        const done = reply.toLowerCase().includes("finish interview");
+            const result = await chat.sendMessage(message);
+            const reply = result.response.text();
+            const done = reply.toLowerCase().includes("finish interview");
 
-        session.messages.push({ role: "model", parts: [{ text: reply }] });
-        res.json({ message: reply, done });
+            session.messages.push({ role: "model", parts: [{ text: reply }] });
+            res.json({ message: reply, done });
+        } catch (aiErr) {
+            console.error("AI Message error (falling back to mock):", aiErr);
+            // Dynamic Mock Fallback logic
+            const fallbacks = [
+                "That's a great role! Tell me about the tools you'd use for that job.",
+                "How do you handle safety or quality control in your work?",
+                "Can you describe a time you fixed a difficult problem related to this role?",
+                "What training or certifications do you plan to get next?",
+                "Thank you! I now have enough information to analyze your profile. Click 'Finish Interview' to see your results."
+            ];
+            const reply = fallbacks[Math.min(session.msgCount - 1, fallbacks.length - 1)];
+            const done = reply.includes("Finish Interview");
+            session.messages.push({ role: "model", parts: [{ text: reply }] });
+            return res.json({ message: reply, done, warning: "Using fallback AI due to service unavailability." });
+        }
     } catch (err) {
-        console.error("AI Message error:", err);
-        res.status(500).json({ message: "AI is currently unavailable. Try again later." });
+        console.error("SendMessage outer error:", err);
+        res.status(500).json({ message: "Internal server error." });
     }
 };
 
@@ -112,6 +131,7 @@ const finishInterview = async (req, res) => {
         if (!session) return res.status(404).json({ message: "Session not found." });
 
         if (!process.env.GEMINI_API_KEY) {
+            console.warn("⚠️ API KEY MISSING: Generating mock analysis data.");
             // ── Dynamic Simulated Fallback ────────────────────────
             // Extract role from transcript (usually the answer to the first question)
             const userAnswers = session.messages.filter(m => m.role === "user");
@@ -199,7 +219,16 @@ JSON Requirements:
 2. "level": "Job Ready" (>85 only if mastery shown), "Intermediate" (60-85), "Needs Development" (<60).
 3. "strengths": 3 specific points based on THEIR actual answers.
 4. "gaps": 3 specific weaknesses identified from THEIR vague/wrong answers.
-5. "courses": 3 specific courses (local vocational for local jobs e.g. ITI, specialized for tech) to bridge the EXACT gaps found.
+5. "courses": EXACTLY 3 specific courses that directly address the "gaps" you identified. You MUST use platforms like Udemy, Coursera, or local vocational institutes (like ITI) depending on the job role. 
+EACH course object in the array MUST strictly follow this exact schema:
+{
+  "title": "String (e.g. 'Advanced React for Full Stack Developers')",
+  "provider": "String (e.g. 'Udemy', 'Coursera', 'Google', 'ITI')",
+  "level": "String (e.g. 'Beginner', 'Intermediate', 'Advanced')",
+  "duration": "String (e.g. '4 Weeks', '6 Months')",
+  "skill": "String (The SPECIFIC skill this course teaches, e.g. 'React' or 'Circuit Wiring')",
+  "link": "String (Just use '#')"
+}
 
 JSON format only.`;
 
@@ -234,8 +263,32 @@ JSON format only.`;
             courses: data.courses
         });
     } catch (err) {
-        console.error("Finish error:", err);
-        res.status(500).json({ message: "Analysis failed." });
+        console.error("Finish AI error (falling back to mock):", err);
+        // Extract role from transcript for better mock data
+        const userAnswers = session.messages.filter(m => m.role === "user");
+        const targetRoleInput = userAnswers[1]?.parts[0].text?.toLowerCase() || "";
+
+        let mockData = {
+            score: 70,
+            analysis: {
+                strengths: ["Good communication", "Willingness to learn", "Basic skill set"],
+                gaps: ["Advanced technical depth", "Practical experience", "Certifications"],
+                level: "Intermediate"
+            },
+            courses: [
+                { title: "General Skill Mastery", provider: "JobGati", level: "Beginner", duration: "4 weeks", skill: "General", link: "#" },
+                { title: "Workplace Communication", provider: "Coursera", level: "Beginner", duration: "2 weeks", skill: "Soft Skills", link: "#" }
+            ]
+        };
+
+        // Save and return
+        await User.findByIdAndUpdate(req.user.id, {
+            interviewScore: mockData.score,
+            interviewAnalysis: mockData.analysis,
+            learningPath: mockData.courses,
+        });
+
+        res.json({ ...mockData, warning: "Analysis generated using local engine due to AI unavailability." });
     }
 };
 

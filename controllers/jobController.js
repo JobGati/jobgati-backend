@@ -1,5 +1,7 @@
 const Job = require("../models/Job");
 const User = require("../models/User");
+const Application = require("../models/Application");
+const Notification = require("../models/Notification");
 
 // GET /api/jobs  (all active jobs or filtered)
 const getJobs = async (req, res) => {
@@ -41,9 +43,25 @@ const getJobs = async (req, res) => {
             jobs.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
         }
 
+        if (req.query.direct === 'true') {
+            jobs = jobs.map(job => ({ ...job, applyNote: "Applied directly — evaluate based on interview" }));
+        }
+
         res.json({ jobs });
     } catch (err) {
         console.error("Job fetching error:", err);
+        res.status(500).json({ message: "Server error." });
+    }
+};
+
+// GET /api/jobs/:id
+const getJobById = async (req, res) => {
+    try {
+        const job = await Job.findById(req.params.id).populate("employer", "name companyName");
+        if (!job) return res.status(404).json({ message: "Job not found." });
+        res.json({ job });
+    } catch (err) {
+        console.error("getJobById error:", err);
         res.status(500).json({ message: "Server error." });
     }
 };
@@ -62,10 +80,49 @@ const applyToJob = async (req, res) => {
         if (alreadyApplied)
             return res.status(400).json({ message: "You have already applied to this job." });
 
+        const user = await User.findById(req.user.id);
+
+        // Basic Match Score logic (could be more complex)
+        let matchScore = 0;
+        if (user.skills && job.skills && job.skills.length > 0) {
+            const matches = job.skills.filter(skill => user.skills.includes(skill));
+            matchScore = Math.floor((matches.length / job.skills.length) * 100);
+        } else if (job.skills && job.skills.length === 0) {
+            matchScore = 50; // Neutral score if no skills required
+        }
+
+        // Create Application record
+        const application = await Application.create({
+            user: req.user.id,
+            job: req.params.id,
+            matchScore,
+            status: job.jobCategory === "LOCAL" ? "applied" : "applied"
+        });
+
+        // Add to Job applicants
         job.applicants.push({ user: req.user.id });
         await job.save();
-        res.json({ message: "Applied successfully." });
+
+        // Create Notification for Employer
+        await Notification.create({
+            user: job.employer,
+            message: `New applicant for ${job.title}: ${user.name}`
+        });
+
+        if (job.jobCategory === "LOCAL") {
+            return res.json({
+                message: "Application logged. You can now contact the recruiter.",
+                contact: job.contactInfo,
+                application
+            });
+        }
+
+        res.json({
+            message: "Applied successfully. Your resume is being reviewed.",
+            application
+        });
     } catch (err) {
+        console.error("Apply error:", err);
         res.status(500).json({ message: "Server error." });
     }
 };
@@ -155,8 +212,20 @@ const updateEmployerProfile = async (req, res) => {
     }
 };
 
+// GET /api/employer/candidates/:id
+const getCandidateProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select("-password");
+        if (!user) return res.status(404).json({ message: "Candidate not found." });
+        res.json({ profile: user });
+    } catch (err) {
+        res.status(500).json({ message: "Server error." });
+    }
+};
+
 module.exports = {
-    getJobs, applyToJob, createJob,
+    getJobs, getJobById, applyToJob, createJob,
     getEmployerJobs, getApplicants, updateJobStatus,
     getEmployerProfile, updateEmployerProfile,
+    getCandidateProfile
 };

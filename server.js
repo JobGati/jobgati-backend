@@ -7,7 +7,7 @@ const fs = require("fs");
 
 const app = express();
 
-// ── CORS ──────────────────────────────────────────────────
+// CORS 
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
@@ -33,38 +33,40 @@ app.use(cors({
   credentials: true,
 }));
 
-// ── Body parsers ─────────────────────────────────────────
+//  Body parsers 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ── Static uploads folder ─────────────────────────────────
+// ─Static uploads folder 
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 app.use("/uploads", express.static(uploadsDir));
 
-// ── Routes ────────────────────────────────────────────────
+// Routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/profile", require("./routes/profileRoutes"));
 app.use("/api/jobs", require("./routes/jobRoutes"));
 app.use("/api/employer", require("./routes/employerRoutes"));
 app.use("/api/interview", require("./routes/interviewRoutes"));
+app.use("/api/notifications", require("./routes/notificationRoutes"));
+app.use("/api/part-time", require("./routes/partTimeRoutes"));
 
 // Learning-path shortcut (same controller, interview router)
 app.use("/api/learning-path", require("./routes/interviewRoutes"));
 
-// ── Health check ─────────────────────────────────────────
+//  Health check
 app.get("/", (req, res) => res.json({ message: "JobGati API Running ✓" }));
 
-// ── 404 ───────────────────────────────────────────────────
+// 404 
 app.use((req, res) => res.status(404).json({ message: "Route not found." }));
 
-// ── Global error handler ──────────────────────────────────
+// Global error handler 
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ message: err.message || "Internal server error." });
 });
 
-// ── MongoDB + Start server ────────────────────────────────
+// MongoDB + Start server 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 

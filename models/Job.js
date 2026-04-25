@@ -18,6 +18,19 @@ const jobSchema = new mongoose.Schema(
         skills: [{ type: String }],
         openings: { type: Number, default: 1 },
         status: { type: String, enum: ["active", "closed"], default: "active" },
+        jobCategory: { type: String, enum: ["LOCAL", "TECH"], default: "TECH" },
+        interviewType: { type: String, enum: ["HR", "AI", "NONE"], default: "NONE" },
+        interviewSlots: [
+            {
+                date: { type: String },
+                time: { type: String },
+                isBooked: { type: Boolean, default: false }
+            }
+        ],
+        contactInfo: {
+            phone: { type: String, default: "" },
+            email: { type: String, default: "" }
+        },
         applicants: [
             {
                 user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
